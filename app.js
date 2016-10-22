@@ -4,18 +4,120 @@ var contentful = require('contentful')
 var util = require('util')
 var Promise = require('promise')
 
+var Nexmo = require('nexmo');
+var privateKey = require('fs').readFileSync(__dirname + '/nexmo.key');
+
+var nexmo = new Nexmo({
+    apiKey: '96345f76',
+    apiSecret: '0e139dfe7e0e2131',
+    applicationId: '74bab903-cc90-4d50-b52b-f8fd318643d0',
+    privateKey: privateKey,
+  },{debug:true});
+
+// nexmo.calls.create(
+//       {
+//         to: [{
+//           type: 'phone',
+//           number: 447912138599
+//         }],
+//         from: {
+//           type: 'phone',
+//           number: 447520632064
+//         },
+//         answer_url: ['http://hack.hazan.me/answer']
+//       },
+//       function(err, res) {
+//         if(err) { console.error(err); }
+//         else { console.log(res); 
+// }      }
+// );
+
+var server = restify.createServer({
+  name: 'myapp',
+  version: '1.0.0'
+});
+server.use(restify.acceptParser(server.acceptable));
+server.use(restify.queryParser());
+server.use(restify.bodyParser());
+
+server.get('/answer', function (req, res, next) {
+	console.log('called');
+	res.send([
+	{
+		"action": "talk",
+		"text": "Hi, what would you like to do",
+	},
+	{
+		"action": "record",
+		"endOnSilence": 3,
+		"eventUrl": ["http://hack.hazan.me/event"]
+	},
+	{
+		"action": "talk",
+		"text": "end of recording",
+	//	"loop": 0
+	}
+	]);
+  return next();
+});
+
+server.get('/answer_url', function (req, res, next) {
+	console.log('answer_url',req);
+
+  return next();
+});
+
+server.post('/event_url', function (req, res, next) {
+	console.log('event_url',req);
+
+  return next();
+});
+
+server.post('/event', function (req, res, next) {
+	console.log('event',req.params);
+
+  return next();
+});
+
+server.get('/inbound', function (req, res) {
+  handleParams(req.query, res);
+});
+
+server.post('/inbound', function (req, res) {
+	console.log('post')
+  handleParams(req.body, res);
+});
+
+function handleParams(params, res) {
+	console.log(params);
+  //res.status(200).end();
+  res.send('ok');
+  // if (!params.to || !params.msisdn) {
+  //   console.log('This is not a valid inbound SMS message!');
+  // } else {
+  //   console.log('Success');
+  //   var incomingData = {
+  //     messageId: params.messageId,
+  //     from: params.msisdn,
+  //     text: params.text,
+  //     type: params.type,
+  //     timestamp: params['message-timestamp']
+  //   };
+  //   console.log(incomingData);
+  //   //storage.setItem('id_' + params.messageId, incomingData);
+  //   res.send(incomingData);
+  // }
+  // res.status(200).end();
+}
+
+server.listen(8099, function () {
+  console.log('%s listening at %s', server.name, server.url);
+});
+
+/*
 var client = contentful.createClient({
   // This is the space ID. A space is like a project folder in Contentful terms
   space: 'rbld2qmk6my1',
-  // This is the access token for this space. Normally you get both ID and the token in the Contentful web app
-  accessToken: '3462e7e4d60fb7d2e0a64ef92f6834d5221e57fd9841bc99cfd302fa9decc250'
-});
-
-var currentRoom = null;
-
-var getRoom = function(id){
-	console.log('get room',id)
-	return client.getEntry(id)
 	.then(function (entry) {
 	  console.log(entry)
 	  return currentRoom = entry;
@@ -105,3 +207,5 @@ dialog.matches('Fight', [
 		session.send('Ok... no problem.');
 	}
 ]);
+
+*/
