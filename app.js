@@ -9,10 +9,10 @@ var Nexmo = require('nexmo');
 var privateKey = require('fs').readFileSync(__dirname + '/nexmo.key');
 
 var nexmo = new Nexmo({
-    apiKey: '96345f76',
-    apiSecret: '0e139dfe7e0e2131',
-    applicationId: '74bab903-cc90-4d50-b52b-f8fd318643d0',
-    privateKey: privateKey,
+	apiKey: '96345f76',
+	apiSecret: '0e139dfe7e0e2131',
+	applicationId: '74bab903-cc90-4d50-b52b-f8fd318643d0',
+	privateKey: privateKey,
   },{debug:true});
 
 // nexmo.calls.create(
@@ -32,6 +32,10 @@ var nexmo = new Nexmo({
 //         else { console.log(res); 
 // }      }
 // );
+
+var sendSMS = function (msg){
+	nexmo.message.sendSms('447520632064', '447912138599', msg);
+}
 
 var server = restify.createServer({
   name: 'myapp',
@@ -89,41 +93,52 @@ server.post('/inbound', function (req, res) {
   handleParams(req.body, res);
 });
 
-function directIntent (query){
+function directIntent (user, query){
 	var url = 'https://api.projectoxford.ai/luis/v1/application?id=af51ea64-f0ba-4da8-a746-e8518df6205a&subscription-key=6ffb4f3bf92d4eeba7b012e6ae9ba800&q=';
 	
 
 	request(url+encodeURIComponent(query), function (error, response, body) {
 	  if (!error && response.statusCode == 200) {
-	    console.log(body) // Show the HTML for the Google homepage.
+		body = JSON.parse(body);
+		// console.log(body)
+		console.log(body.intents)
+		// console.log(body.intents[0])
+		// console.log(body.intents[0].intent)
+		switch(body.intents[0].intent){
+			case 'Move':
+				moveHandler(user, body.entities, sendSMS);
+			break;
+			case 'Fight':
+				fightHandler(user, body.entities, sendSMS);
+			break;
+			case 'Take':
+				takeHandler(user, body.entities, sendSMS);
+			break;
+			case 'Location':
+				locationHandler(user, body.entities, sendSMS);
+			break;
+		}
 	  }else{
-	  	console.log('error',error);
+		console.log('error',error);
 	  }
 	})
 }
 
-function handleParams(params, res) {
-  console.log(params);
+var received = {};
 
-  directIntent(params.text);
-  //res.status(200).end();
-  res.send('ok');
-  // if (!params.to || !params.msisdn) {
-  //   console.log('This is not a valid inbound SMS message!');
-  // } else {
-  //   console.log('Success');
-  //   var incomingData = {
-  //     messageId: params.messageId,
-  //     from: params.msisdn,
-  //     text: params.text,
-  //     type: params.type,
-  //     timestamp: params['message-timestamp']
-  //   };
-  //   console.log(incomingData);
-  //   //storage.setItem('id_' + params.messageId, incomingData);
-  //   res.send(incomingData);
-  // }
-  // res.status(200).end();
+function handleParams(params, res) {
+	console.log(params);
+	if(!received[params.messageId]){
+		received[params.messageId] = true;
+		user = getUserPhone(params.msisdn)
+
+		if(user){
+			console.log('direct', params.text)
+		  directIntent(user, params.text);
+
+		  res.send('ok');
+		}
+	}
 }
 
 server.listen(8099, function () {
@@ -142,24 +157,72 @@ var userData = {};
 
 var getUser = function (session){
 	id = session.message.user.id;
+	
+	return getUserGeneric(id, function(msg){
+		session.send(msg);
+	});
+}
+var getUserPhone = function (id){	
+	return getUserGeneric(id, sendSMS);
+}
+
+var getUserGeneric = function (id, message){
 	if(typeof userData[id] == "undefined"){
 		userData[id] = {
 			currentRoom: null,
-			weapon: false,
-			killed: []
+			items: {},
+			killed: {}
 		}
-		setupUser(session);
+		message("Welcome to Mike's Adventure Time\n\nHaving fallen down a hole, you look around your surroundings.");
+		getRoom(userData[id], '76SKRPgidOyk2aGsQyiQkO').then(function (res){
+			message(res);
+		});
+		return null;
 	}
 
 	return userData[id];
+}
+
+var doIHaveItem = function (user, item){
+	console.log('Do i have', item)
+	console.log(user)
+	return user.items[item];
+}
+
+var haveIKilled = function (user, enemy){
+	return user.killed[enemy];
+}
+
+var getRoomDescription = function(user){
+
+		var desc = user.currentRoom.fields.description;
+
+		if(user.currentRoom.fields.enemy){
+			if(haveIKilled(user, user.currentRoom.sys.id)){
+				desc += ' '+user.currentRoom.fields.enemyAfter;
+			}else{
+				desc += ' '+user.currentRoom.fields.enemyBefore;
+			}
+		}
+
+		if(user.currentRoom.fields.item){
+			if(doIHaveItem(user, user.currentRoom.fields.item)){
+				desc += ' '+user.currentRoom.fields.itemAfter;
+			}else{
+				desc += ' '+user.currentRoom.fields.itemBefore;
+			}
+		}
+
+		return desc;
 }
 
 var getRoom = function(user,id){
 	console.log('get room',id)
 	return client.getEntry(id)
 	.then(function (entry) {
-	  console.log(entry)
-	  return user.currentRoom = entry;
+		console.log(entry)
+		user.currentRoom = entry;
+		return getRoomDescription(user);
 	}, function (error){
 		console.log('Contentful Error', error)
 	});
@@ -175,27 +238,11 @@ var moveDirection = function (user, direction){
 	}
 }
 
-var fightEnemy = function (user, fight){
-	console.log('fight', fight);
-
-	if(user.currentRoom.fields.enemy && user.currentRoom.fields.enemy.toLowerCase() == fight){
-		if(user.weapon){
-			user.killed.push(currentRoom.sys.id);
-			return new Promise.resolve({success:true, message:'You kill the '+fight+', step over it\'s dead body and walk through the door'});
-
-		}else{
-			return new Promise.resolve({success:false, message:'You dont have a weapon'});
-		}
-	}else{
-		return new Promise.resolve({success:false, message:'There isnt a '+fight+' here'});
-	}
-}
-
 var takeItem = function (user, item){
 	console.log('item', item);
 
 	if(user.currentRoom.fields.item && user.currentRoom.fields.item.toLowerCase() == item){
-		user.weapon = true;
+		user.items[user.currentRoom.fields.item] = true;
 		return new Promise.resolve({success:true, message:'You pick up the '+item});
 	}else{
 		return new Promise.resolve({success:false, message:'There isnt a '+item+' here'});
@@ -222,53 +269,104 @@ var recognizer = new builder.LuisRecognizer(model);
 var dialog = new builder.IntentDialog({ recognizers: [recognizer] });
 bot.dialog('/', dialog);
 
-var setupUser = function (session) {
-	console.log('test');
-	session.send("Welcome to Mike's Adventure Time\n\nHaving fallen down a hole, you look around your surroundings.");
-	user = getUser(session);
-    getRoom(user, '76SKRPgidOyk2aGsQyiQkO').then(function (res){
-		session.send(res.fields.description);
-    });
-}
-
 dialog.onBegin(getUser);
 
+function moveHandler(user, entities, message){
+	// Resolve and store any entities passed from LUIS.
+	var dir = null;
+
+	if(builder.EntityRecognizer.findEntity(entities, 'direction::North')){
+		dir = 'north';
+	}
+	if(builder.EntityRecognizer.findEntity(entities, 'direction::South')){
+		dir = 'south';
+	}
+	if(builder.EntityRecognizer.findEntity(entities, 'direction::East')){
+		dir = 'east';
+	}
+	if(builder.EntityRecognizer.findEntity(entities, 'direction::West')){
+		dir = 'west';
+	}
+
+	//console.log(args)
+	//console.log()
+	//console.log(dir);
+
+	if(dir){
+		if(user.currentRoom.fields.enemy && user.currentRoom.fields.enemyBlocks == dir){
+			message('The '+user.currentRoom.fields.enemy+' blocks you from going ' + user.currentRoom.fields.enemyBlocks);
+		}else{
+			moveDirection(user, dir).then(function(res){
+				console.log('return', res);
+				if(res){
+					message(res);
+				}else{
+					message('You cant go that way');
+				}
+			});
+		}
+	}else{
+		message('I couldnt tell where you wanted to go');
+	}
+}
+
+function fightHandler(user, entities, message){
+	// Resolve and store any entities passed from LUIS.
+	var fight = null;
+
+	if(builder.EntityRecognizer.findEntity(entities, 'Enemy::Werewolf')){
+		fight = 'werewolf';
+	}
+
+	if(fight){
+		console.log('fight', fight);
+
+		if(user.currentRoom.fields.enemy && user.currentRoom.fields.enemy.toLowerCase() == fight){
+			console.log('fight on', user.currentRoom.fields.enemyRequiredItem, user)
+			if(!user.currentRoom.fields.enemyRequiredItem || doIHaveItem(user, user.currentRoom.fields.enemyRequiredItem)){
+				console.log('I have the power')
+				user.killed[user.currentRoom.sys.id] = true;
+				message(user.currentRoom.fields.enemyFight);
+			}else{
+				message('You need a '+user.currentRoom.fields.enemyRequiredItem+' to fight the '+user.currentRoom.fields.enemy);
+			}
+		}else{
+			message('There isnt a '+fight+' here');
+		}
+	}else{
+		message('I couldnt tell who you wanted to fight');
+	}
+}
+
+function takeHandler(user, entities, message){
+	// Resolve and store any entities passed from LUIS.
+	var item = null;
+
+	if(builder.EntityRecognizer.findEntity(entities, 'Items::Sword')){
+		item = 'sword';
+	}
+	console.log('item', item);
+
+	if(item){
+		takeItem(user, item).then(function(res){
+			console.log('return', res);
+			message(res.message);
+		});
+	}else{
+		message('I couldnt tell what you wanted to take');
+	}
+}
+
+function locationHandler(user, entities, message){
+	message(getRoomDescription(user));
+}
 // Add intent handlers
 dialog.matches('Move', [
 	function (session, args, next) {
 		user = getUser(session);
-		// Resolve and store any entities passed from LUIS.
-		var dir = null;
 
-		if(builder.EntityRecognizer.findEntity(args.entities, 'direction::North')){
-			dir = 'north';
-		}
-		if(builder.EntityRecognizer.findEntity(args.entities, 'direction::South')){
-			dir = 'south';
-		}
-		if(builder.EntityRecognizer.findEntity(args.entities, 'direction::East')){
-			dir = 'east';
-		}
-		if(builder.EntityRecognizer.findEntity(args.entities, 'direction::West')){
-			dir = 'west';
-		}
-
-		//console.log(args)
-		//console.log()
-		//console.log(dir);
-
-		if(dir){
-			console.log('mv');
-			moveDirection(user, dir).then(function(res){
-				console.log('return', res);
-				if(res){
-					session.send(res.fields.description);
-				}else{
-					session.send('You cant go that way');
-				}
-			});
-		}else{
-			session.send('I couldnt tell where you wanted to go');
+		if(user){
+			moveHandler(user, args.entities, function(msg){session.send(msg);})
 		}
 	}
 ]);
@@ -276,24 +374,9 @@ dialog.matches('Move', [
 dialog.matches('Fight', [
 	function (session, args, next) {
 		user = getUser(session);
-		// Resolve and store any entities passed from LUIS.
-		var fight = null;
 
-		if(builder.EntityRecognizer.findEntity(args.entities, 'Enemy::Werewolf')){
-			fight = 'werewolf';
-		}
-		console.log(args)
-		//console.log(session)
-		console.log(fight);
-
-		if(fight){
-			console.log('fight');
-			fightEnemy(user, fight).then(function(res){
-				console.log('return', res);
-				session.send(res.message);
-			});
-		}else{
-			session.send('I couldnt tell who you wanted to fight');
+		if(user){
+			fightHandler(user, args.entities, function(msg){session.send(msg);});
 		}
 	}
 ]);
@@ -301,24 +384,19 @@ dialog.matches('Fight', [
 dialog.matches('Take', [
 	function (session, args, next) {
 		user = getUser(session);
-		// Resolve and store any entities passed from LUIS.
-		var item = null;
 
-		if(builder.EntityRecognizer.findEntity(args.entities, 'Items::Sword')){
-			item = 'sword';
+		if(user){
+			takeHandler(user, args.entities, function(msg){session.send(msg);});
 		}
-		console.log(args)
-		//console.log(session)
-		console.log(item);
+	}
+]);
+// Add intent handlers
+dialog.matches('Location', [
+	function (session, args, next) {
+		user = getUser(session);
 
-		if(item){
-			console.log('item');
-			takeItem(user, item).then(function(res){
-				console.log('return', res);
-				session.send(res.message);
-			});
-		}else{
-			session.send('I couldnt tell what you wanted to take');
+		if(user){
+			locationHandler(user, args.entities, function(msg){session.send(msg);});
 		}
 	}
 ]);
